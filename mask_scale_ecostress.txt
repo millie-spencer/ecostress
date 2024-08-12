@@ -1,0 +1,53 @@
+import rasterio
+import numpy as np
+from os import makedirs
+from os.path import join
+from os.path import exists
+from os.path import basename
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+
+
+def ingest_ECOSTRESS_LST(L2_LST_filename, L2_CLOUD_filename, output_directory):
+    LST_FILL_VALUE = 0
+    LST_SCALE_FACTOR = 0.02
+    print(f"loading L2_LST file: {L2_LST_filename}")
+    timestamp_UTC = basename(L2_LST_filename).split("_")[-2][3:]
+    aquisition_datetime_UTC = datetime.strptime(timestamp_UTC, "%Y%j%H%M%S")
+    print(f"UTC: {aquisition_datetime_UTC.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    acquisition_datetime_PST = aquisition_datetime_UTC - timedelta(hours=8)
+    print(f"PST: {acquisition_datetime_PST.strftime('%Y-%m-%d %H:%M:%S PST')}")
+
+    with rasterio.open(L2_LST_filename, "r") as LST_file:
+        LST_DN = LST_file.read(1)
+        profile = LST_file.profile
+
+    LST_DN = np.where(LST_DN == LST_FILL_VALUE, np.nan, LST_DN)
+    LST_raw = LST_DN * LST_SCALE_FACTOR
+
+    print(f"loading L2_CLOUD file: {L2_CLOUD_filename}")
+    with rasterio.open(L2_CLOUD_filename, "r") as cloud_file:
+        QC = cloud_file.read(1)
+        cloud_mask = (QC >> 1) & 1
+
+    LST = np.where(cloud_mask, np.nan, LST_raw)
+    plt.imshow(LST, cmap="jet")
+    plt.colorbar()
+    plt.show()
+
+    profile["dtype"] = "float32"
+    LST = LST.astype("float32")
+
+    if not exists(output_directory):
+        makedirs(output_directory)
+
+    output_timestamp = acquisition_datetime_PST.strftime("%Y.%m.%d.%H.%M.%S")
+    output_filename = join(output_directory, f"LST_{output_timestamp}.tif")
+    print(f"output file: {output_filename}")
+
+    with rasterio.open(output_filename, "w", **profile) as output_file:
+        output_file.write(LST, 1)
+
+
+ingest_ECOSTRESS_LST(L2_LST_filename, L2_CLOUD_filename, RASTER_DIRECTORY)
